@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { NavLink } from 'react-router';
-import { useDispatch, useSelector } from 'react-redux';
+import { useSelector } from 'react-redux';
 import axiosClient from '../utils/axiosClient';
 import Navbar from '../components/Navbar';
 import { 
@@ -56,7 +56,6 @@ function Homepage() {
   // Solved Stats calculation
   const stats = useMemo(() => {
     const total = problems.length;
-    const solvedSet = new Set(solvedProblems.map(p => p._id));
     const solvedCount = solvedProblems.length;
     
     const easyTotal = problems.filter(p => p.difficulty?.toLowerCase() === 'easy').length;
@@ -351,7 +350,7 @@ function Homepage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-base-content/5">
-                  {filteredProblems.map((problem, index) => {
+                  {filteredProblems.map((problem) => {
                     const isSolved = solvedProblems.some(sp => sp._id === problem._id);
                     return (
                       <tr 

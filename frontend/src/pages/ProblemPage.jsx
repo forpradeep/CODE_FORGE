@@ -42,6 +42,7 @@ const ProblemPage = () => {
   const [selectedLanguage, setSelectedLanguage] = useState('javascript');
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(null);
   const [running, setRunning] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [runResult, setRunResult] = useState(null);
@@ -88,13 +89,14 @@ const ProblemPage = () => {
   useEffect(() => {
     const fetchProblem = async () => {
       setLoading(true);
+      setLoadError(null);
       try {
         const response = await axiosClient.get(`/problem/problemById/${problemId}`);
         setProblem(response.data);
         const initialCode = response.data.startCode?.find(sc => sc.language === langMap[selectedLanguage])?.initialCode || '';
         setCode(initialCode);
       } catch (error) {
-        console.error('Error fetching problem:', error);
+        setLoadError(error.response?.data?.message || 'This problem could not be loaded.');
       } finally {
         setLoading(false);
       }
@@ -202,8 +204,17 @@ const ProblemPage = () => {
     );
   }
 
+  if (!problem) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-base-100 px-4 text-center">
+        <p className="text-sm text-base-content/70">{loadError || 'This problem could not be loaded.'}</p>
+        <button type="button" onClick={() => navigate('/')} className="btn btn-sm btn-primary">Back to problems</button>
+      </div>
+    );
+  }
+
   return (
-    <div className="h-screen flex flex-col bg-base-100 overflow-hidden select-none">
+    <div className="min-h-screen lg:h-screen flex flex-col bg-base-100 lg:overflow-hidden select-none">
       {/* Test Mode Banner if active */}
       {testId && (
         <div className={`flex items-center justify-between px-4 py-2 text-xs font-bold ${
@@ -312,9 +323,9 @@ const ProblemPage = () => {
       </div>
 
       {/* Main Split Panels */}
-      <div className="flex-1 flex min-h-0">
+      <div className="flex-1 flex flex-col lg:flex-row min-h-0">
         {/* Left Panel: Description, Editorial, Solutions, Submissions, AI Chat */}
-        <div className="w-1/2 flex flex-col border-r border-base-content/10 bg-base-100">
+        <div className="w-full lg:w-1/2 min-h-[50vh] lg:min-h-0 flex flex-col border-b lg:border-b-0 lg:border-r border-base-content/10 bg-base-100">
           {/* Left Navigation Tabs */}
           <div className="flex items-center gap-1 px-3 pt-2 border-b border-base-content/10 bg-base-200/30 overflow-x-auto flex-shrink-0">
             <button
@@ -464,7 +475,7 @@ const ProblemPage = () => {
         </div>
 
         {/* Right Panel: Monaco Code Editor + Output Console */}
-        <div className="w-1/2 flex flex-col bg-base-100">
+        <div className="w-full lg:w-1/2 min-h-[50vh] lg:min-h-0 flex flex-col bg-base-100">
           {/* Right Navigation Tabs */}
           <div className="flex items-center justify-between px-3 pt-2 border-b border-base-content/10 bg-base-200/30 flex-shrink-0">
             <div className="flex items-center gap-1">
@@ -583,10 +594,14 @@ const ProblemPage = () => {
                     </div>
 
                     {/* Test Cases Output list */}
+                    {runResult.error && (
+                      <p className="text-xs text-error font-medium">{runResult.error}</p>
+                    )}
+
                     {runResult.testCases && (
                       <div className="space-y-3">
                         {runResult.testCases.map((tc, idx) => {
-                          const passed = tc.status_id === 3 || runResult.success;
+                          const passed = tc.status_id === 3;
                           return (
                             <div key={idx} className="p-4 rounded-xl bg-base-200/50 border border-base-content/10 space-y-2 text-xs font-mono">
                               <div className="flex items-center justify-between font-sans">

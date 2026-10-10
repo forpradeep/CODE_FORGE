@@ -12,7 +12,7 @@ function ChatAi({ problem }) {
   ]);
   const [loading, setLoading] = useState(false);
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm();
+  const { register, handleSubmit, reset } = useForm();
   const messagesEndRef = useRef(null);
 
   useEffect(() => {

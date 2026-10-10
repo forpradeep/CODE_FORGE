@@ -1,4 +1,4 @@
-import {Routes, Route ,Navigate} from "react-router";
+import {Routes, Route, Navigate, NavLink} from "react-router";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Homepage from "./pages/Homepage";
@@ -61,8 +61,14 @@ function App(){
       <Route path="/tests/:testId" element={isAuthenticated ? <TestAttempt /> : <Navigate to="/login" />} />
       <Route path="/tests/:testId/result" element={isAuthenticated ? <MyTestResult /> : <Navigate to="/login" />} />
       <Route path="/profile" element={isAuthenticated ? <Profile /> : <Navigate to="/login" />} />
-      <Route path="/problem/:problemId" element={<ProblemPage/>}></Route>
-      
+      <Route path="/problem/:problemId" element={isAuthenticated ? <ProblemPage/> : <Navigate to="/login" />} />
+      <Route path="*" element={
+        <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-base-200 px-4 text-center">
+          <h1 className="text-3xl font-bold">Page not found</h1>
+          <p className="text-sm text-base-content/70">That page is not part of CodeForge.</p>
+          <NavLink to="/" className="btn btn-primary">Back to problems</NavLink>
+        </div>
+      } />
     </Routes>
   </>
   )

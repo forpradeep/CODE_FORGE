@@ -82,8 +82,8 @@ const addStudents = async (req, res) => {
         const { id } = req.params;
         const { emails } = req.body;
 
-        if (!Array.isArray(emails) || emails.length === 0)
-            return res.status(400).json({ message: "emails must be a non-empty array" });
+        if (!Array.isArray(emails) || emails.length === 0 || emails.length > 200)
+            return res.status(400).json({ message: "emails must be a list of 1 to 200 addresses" });
 
         const section = await Section.findById(id);
         if (!section)
@@ -105,7 +105,14 @@ const addStudents = async (req, res) => {
         section.students.push(...newStudentIds);
         await section.save();
 
-        // Point each newly-added student's user record at this section.
+        // A student belongs to one section. Remove them from any other roster.
+        if (newStudentIds.length > 0) {
+            await Section.updateMany(
+                { _id: { $ne: section._id }, students: { $in: newStudentIds } },
+                { $pull: { students: { $in: newStudentIds } } }
+            );
+        }
+
         await User.updateMany(
             { _id: { $in: newStudentIds } },
             { $set: { section: section._id } }
@@ -159,6 +166,10 @@ const deleteSection = async (req, res) => {
         if (req.result.role !== 'admin' && String(section.createdBy) !== String(req.result._id))
             return res.status(403).json({ message: "You don't own this section" });
 
+        const testCount = await Test.countDocuments({ section: section._id });
+        if (testCount > 0)
+            return res.status(409).json({ message: "Delete this section's tests before deleting the section" });
+
         await User.updateMany(
             { section: section._id },
             { $set: { section: null } }
@@ -200,14 +211,15 @@ const updateSection = async (req, res) => {
 
 const joinSectionByCode = async (req, res) => {
     try {
+        if (req.result.role !== 'user')
+            return res.status(403).json({ message: "Only student accounts can join a section by code" });
+
         const { code } = req.body;
-        if (!code)
+        if (!code || typeof code !== 'string')
             return res.status(400).json({ message: "Section code is required" });
 
         const trimmedCode = code.trim().toUpperCase();
-        const section = await Section.findOne({ 
-            code: { $regex: new RegExp(`^${trimmedCode}$`, 'i') } 
-        });
+        const section = await Section.findOne({ code: trimmedCode });
 
         if (!section)
             return res.status(404).json({ message: "Invalid section code. No matching section found." });

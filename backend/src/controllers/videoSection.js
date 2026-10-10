@@ -11,8 +11,18 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
+const cloudinaryReady = () => Boolean(
+  process.env.CLOUDINARY_CLOUD_NAME &&
+  process.env.CLOUDINARY_API_KEY &&
+  process.env.CLOUDINARY_API_SECRET
+);
+
 const generateUploadSignature = async (req, res) => {
   try {
+    if (!cloudinaryReady()) {
+      return res.status(503).json({ error: 'Video uploads are not configured' });
+    }
+
     const { problemId } = req.params;
     
     const userId = req.result._id;
@@ -65,7 +75,18 @@ const saveVideoMetadata = async (req, res) => {
 
     const userId = req.result._id;
 
-    // Verify the upload with Cloudinary
+    if (!problemId || !cloudinaryPublicId || !secureUrl) {
+      return res.status(400).json({ error: 'problemId, cloudinaryPublicId and secureUrl are required' });
+    }
+
+    if (!String(cloudinaryPublicId).startsWith(`leetcode-solutions/${problemId}/`)) {
+      return res.status(400).json({ error: 'Invalid video reference' });
+    }
+
+    if (!cloudinaryReady()) {
+      return res.status(503).json({ error: 'Video uploads are not configured' });
+    }
+
     const cloudinaryResource = await cloudinary.api.resource(
       cloudinaryPublicId,
       { resource_type: 'video' }
@@ -128,17 +149,17 @@ const saveVideoMetadata = async (req, res) => {
 const deleteVideo = async (req, res) => {
   try {
     const { problemId } = req.params;
-    const userId = req.result._id;
 
-    const video = await SolutionVideo.findOneAndDelete({problemId:problemId});
-    
-   
+    const video = await SolutionVideo.findOne({ problemId });
 
     if (!video) {
       return res.status(404).json({ error: 'Video not found' });
     }
 
-    await cloudinary.uploader.destroy(video.cloudinaryPublicId, { resource_type: 'video' , invalidate: true });
+    if (cloudinaryReady()) {
+      await cloudinary.uploader.destroy(video.cloudinaryPublicId, { resource_type: 'video', invalidate: true });
+    }
+    await video.deleteOne();
 
     res.json({ message: 'Video deleted successfully' });
 

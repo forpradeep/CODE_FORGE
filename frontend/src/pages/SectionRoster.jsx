@@ -7,7 +7,6 @@ import { Users, UserPlus, Trash2, ChevronLeft, AlertCircle, CheckCircle2, Search
 function SectionRoster() {
   const { id } = useParams();
   const [section, setSection] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [emailsText, setEmailsText] = useState('');
   const [adding, setAdding] = useState(false);
@@ -17,13 +16,10 @@ function SectionRoster() {
 
   const fetchSection = async () => {
     try {
-      setLoading(true);
       const { data } = await axiosClient.get(`/section/${id}`);
       setSection(data);
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to fetch section');
-    } finally {
-      setLoading(false);
     }
   };
 

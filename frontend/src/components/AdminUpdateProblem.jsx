@@ -79,7 +79,7 @@ function AdminUpdateProblem() {
     const fetchProblem = async () => {
       try {
         setLoading(true);
-        const { data } = await axiosClient.get(`/problem/problemById/${problemId}`);
+        const { data } = await axiosClient.get(`/problem/adminProblemById/${problemId}`);
         reset(data);
         setLoadError(null);
       } catch (err) {

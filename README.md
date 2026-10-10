@@ -49,7 +49,30 @@ cp .env.example .env
 npm run dev
 ```
 
+### 3. Docker
+
+From `clean-app`:
+
+```bash
+docker compose up --build
+```
+
+The site is at `http://localhost`. The API is also on `http://127.0.0.1:3000` for local debugging. MongoDB and Redis are bound to localhost only.
+
+For a real deployment set `NODE_ENV=production`, a unique `JWT_KEY` of at least 32 characters, `COOKIE_SECURE=true`, and HTTPS in front of the frontend. Put Judge0, Gemini, and Cloudinary keys in a `.env` file next to `docker-compose.yml` so Compose can pass them through.
+
+Demo accounts (local only):
+
+```bash
+cd backend
+npm run seed
+```
+
+`admin@test.com`, `faculty@test.com`, and `student@test.com` share `Password@123` unless `SEED_PASSWORD` is set. Seeding is refused when `NODE_ENV=production` unless `ALLOW_SEED=true`.
+
 ## Deployment Notes
 
-- **Backend**: Can be deployed to Render, Railway, Heroku, or any VPS. Make sure to configure environment variables in your hosting dashboard.
-- **Frontend**: Can be deployed to Vercel, Netlify, or Cloudflare Pages. Set `VITE_API_BASE_URL` to your production backend URL.
+- **Same host**: build the frontend with no `VITE_API_BASE_URL`. The app calls `/api`, and nginx proxies that to the backend. Sessions use an httpOnly cookie.
+- **Split hosts** (Vercel + Render): set `VITE_API_BASE_URL` to the backend origin, set `CLIENT_URL` to the frontend origin, and set `COOKIE_SAMESITE=none` with `COOKIE_SECURE=true`.
+- **Health**: `GET /health` is process liveness. `GET /ready` checks MongoDB and Redis.
+- **Required production env**: `DB_CONNECT_STRING`, `JWT_KEY`, `CLIENT_URL`. Judge0, Gemini, and Cloudinary are required only for run/submit, AI chat, and video upload.

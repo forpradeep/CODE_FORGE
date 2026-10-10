@@ -15,6 +15,7 @@ build/
 *.env
 */.env
 */.env.*
+!**/.env.example
 
 # Logs
 logs/
@@ -35,3 +36,13 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+Day*
+Day01/
+Day02/
+# ... add any other old folders here
+node_modules/
+.git/
+dist/
+build/
+

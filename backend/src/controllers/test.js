@@ -14,6 +14,17 @@ const createTest = async (req, res) => {
         if (!title || !section || !problems || !startTime || !endTime || !durationMinutes)
             return res.status(400).json({ message: "title, section, problems, startTime, endTime and durationMinutes are required" });
 
+        if (!Array.isArray(problems) || problems.length === 0 || problems.length > 50)
+            return res.status(400).json({ message: "A test needs between 1 and 50 problems" });
+
+        const start = new Date(startTime);
+        const end = new Date(endTime);
+        const duration = Number(durationMinutes);
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()))
+            return res.status(400).json({ message: "startTime and endTime must be valid dates" });
+        if (!Number.isFinite(duration) || duration < 1 || duration > 24 * 60)
+            return res.status(400).json({ message: "durationMinutes must be between 1 and 1440" });
+
         const sectionDoc = await Section.findById(section);
         if (!sectionDoc)
             return res.status(404).json({ message: "Section not found" });
@@ -31,9 +42,9 @@ const createTest = async (req, res) => {
             section,
             problems,
             createdBy: req.result._id,
-            startTime,
-            endTime,
-            durationMinutes
+            startTime: start,
+            endTime: end,
+            durationMinutes: duration
         });
 
         res.status(201).json(test);

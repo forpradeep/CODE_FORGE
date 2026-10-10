@@ -1,229 +1,152 @@
-const Problem = require("../models/problem");
-const Submission = require("../models/submission");
-const User = require("../models/user");
-const {getLanguageById,submitBatch,submitToken} = require("../utils/problemUtility");
-const { validateTestSubmission } = require("./studentTest");
+const mongoose = require('mongoose');
+const Problem = require('../models/problem');
+const Submission = require('../models/submission');
+const User = require('../models/user');
+const { getLanguageById, executeTests, summarizeJudgeResults, publicRunCase } = require('../utils/problemUtility');
+const { validateTestSubmission } = require('./studentTest');
 
-const submitCode = async (req,res,next)=>{
-   
-    // 
-    try{
-      
-       const userId = req.result._id;
-       const problemId = req.params.id;
+const MAX_CODE_CHARS = 100000;
 
-       let {code,language,testId} = req.body;
+const normalizeLanguage = (language) => {
+    const value = String(language || '').toLowerCase();
+    if (value === 'cpp' || value === 'c++') return 'c++';
+    if (value === 'java') return 'java';
+    if (value === 'javascript' || value === 'js') return 'javascript';
+    return null;
+};
 
-      if(!userId||!code||!problemId||!language)
-        return res.status(400).json({message: "Some field missing"});
+const loadRunnableProblem = async (req, res) => {
+    const userId = req.result._id;
+    const problemId = req.params.id;
+    const { code, language, testId } = req.body || {};
 
-      if(testId){
+    if (!code || !problemId || !language) {
+        res.status(400).json({ message: 'Some field missing' });
+        return null;
+    }
+    if (typeof code !== 'string' || code.length > MAX_CODE_CHARS) {
+        res.status(400).json({ message: 'Code is empty or too large' });
+        return null;
+    }
+    if (!mongoose.Types.ObjectId.isValid(problemId)) {
+        res.status(400).json({ message: 'Invalid problem id' });
+        return null;
+    }
+
+    const normalized = normalizeLanguage(language);
+    if (!normalized) {
+        res.status(400).json({ message: 'Unsupported language' });
+        return null;
+    }
+
+    if (testId) {
+        if (!mongoose.Types.ObjectId.isValid(testId)) {
+            res.status(400).json({ message: 'Invalid test id' });
+            return null;
+        }
         const check = await validateTestSubmission(testId, problemId, userId);
-        if(!check.ok)
-          return res.status(check.status).json({message: check.message});
-      }
-
-      if(language==='cpp')
-        language='c++'
-      
-      console.log(language);
-      
-    //    Fetch the problem from database
-       const problem =  await Problem.findById(problemId);
-    //    testcases(Hidden)
-    
-    //   Kya apne submission store kar du pehle....
-    const submittedResult = await Submission.create({
-          userId,
-          problemId,
-          testId: testId || null,
-          code,
-          language,
-          status:'pending',
-          testCasesTotal:problem.hiddenTestCases.length
-     })
-
-    //    Judge0 code ko submit karna hai
-    
-    const languageId = getLanguageById(language);
-   
-    const submissions = problem.hiddenTestCases.map((testcase)=>({
-        source_code:code,
-        language_id: languageId,
-        stdin: testcase.input,
-        expected_output: testcase.output
-    }));
-
-    
-    const submitResult = await submitBatch(submissions);
-    
-    const resultToken = submitResult.map((value)=> value.token);
-
-    const testResult = await submitToken(resultToken);
-    
-
-    // submittedResult ko update karo
-    let testCasesPassed = 0;
-    let runtime = 0;
-    let memory = 0;
-    let status = 'accepted';
-    let errorMessage = null;
-
-
-    for(const test of testResult){
-        if(test.status_id==3){
-           testCasesPassed++;
-           runtime = runtime+parseFloat(test.time)
-           memory = Math.max(memory,test.memory);
-        }else{
-          if(test.status_id==4){
-            status = 'error'
-            errorMessage = test.stderr
-          }
-          else{
-            status = 'wrong'
-            errorMessage = test.stderr
-          }
+        if (!check.ok) {
+            res.status(check.status).json({ message: check.message });
+            return null;
         }
     }
 
-
-    // Store the result in Database in Submission
-    submittedResult.status   = status;
-    submittedResult.testCasesPassed = testCasesPassed;
-    submittedResult.errorMessage = errorMessage;
-    submittedResult.runtime = runtime;
-    submittedResult.memory = memory;
-
-    await submittedResult.save();
-    
-    // ProblemId ko insert karenge userSchema ke problemSolved mein if it is not persent there.
-    
-    // req.result == user Information
-
-    // Only count toward problemSolved during free-practice (not proctored tests).
-    if(!testId && !req.result.problemSolved.includes(problemId)){
-      req.result.problemSolved.push(problemId);
-      await req.result.save();
+    const problem = await Problem.findById(problemId);
+    if (!problem) {
+        res.status(404).json({ message: 'Problem not found' });
+        return null;
     }
-    
-    const accepted = (status == 'accepted')
-    res.status(201).json({
-      accepted,
-      totalTestCases: submittedResult.testCasesTotal,
-      passedTestCases: testCasesPassed,
-      runtime,
-      memory
-    });
-       
-    }
-    catch(err){
-      return next(err);
-    }
-}
 
+    return { userId, problemId, problem, code, language: normalized, testId: testId || null };
+};
 
-const runCode = async(req,res,next)=>{
-    
-     // 
-     try{
-      const userId = req.result._id;
-      const problemId = req.params.id;
+const submitCode = async (req, res, next) => {
+    try {
+        const loaded = await loadRunnableProblem(req, res);
+        if (!loaded) return;
 
-      let {code,language,testId} = req.body;
-
-     if(!userId||!code||!problemId||!language)
-       return res.status(400).json({message: "Some field missing"});
-
-     if(testId){
-       const check = await validateTestSubmission(testId, problemId, userId);
-       if(!check.ok)
-         return res.status(check.status).json({message: check.message});
-     }
-
-   //    Fetch the problem from database
-      const problem =  await Problem.findById(problemId);
-   //    testcases(Hidden)
-      if(language==='cpp')
-        language='c++'
-
-   //    Judge0 code ko submit karna hai
-
-   const languageId = getLanguageById(language);
-
-   const submissions = problem.visibleTestCases.map((testcase)=>({
-       source_code:code,
-       language_id: languageId,
-       stdin: testcase.input,
-       expected_output: testcase.output
-   }));
-
-
-   const submitResult = await submitBatch(submissions);
-   
-   const resultToken = submitResult.map((value)=> value.token);
-
-   const testResult = await submitToken(resultToken);
-
-    let testCasesPassed = 0;
-    let runtime = 0;
-    let memory = 0;
-    let status = true;
-    let errorMessage = null;
-
-    for(const test of testResult){
-        if(test.status_id==3){
-           testCasesPassed++;
-           runtime = runtime+parseFloat(test.time)
-           memory = Math.max(memory,test.memory);
-        }else{
-          if(test.status_id==4){
-            status = false
-            errorMessage = test.stderr
-          }
-          else{
-            status = false
-            errorMessage = test.stderr
-          }
+        const { userId, problemId, problem, code, language, testId } = loaded;
+        const hidden = problem.hiddenTestCases || [];
+        if (hidden.length === 0) {
+            return res.status(400).json({ message: 'This problem has no hidden test cases' });
         }
+
+        const submittedResult = await Submission.create({
+            userId,
+            problemId,
+            testId,
+            code,
+            language,
+            status: 'pending',
+            testCasesTotal: hidden.length,
+        });
+
+        const languageId = getLanguageById(language);
+        const results = await executeTests(hidden.map((testcase) => ({
+            source_code: code,
+            language_id: languageId,
+            stdin: testcase.input,
+            expected_output: testcase.output,
+        })));
+
+        const summary = summarizeJudgeResults(results);
+        submittedResult.status = summary.status;
+        submittedResult.testCasesPassed = summary.testCasesPassed;
+        submittedResult.errorMessage = summary.errorMessage || '';
+        submittedResult.runtime = summary.runtime;
+        submittedResult.memory = summary.memory;
+        await submittedResult.save();
+
+        if (!testId && summary.status === 'accepted') {
+            await User.updateOne(
+                { _id: userId },
+                { $addToSet: { problemSolved: problem._id } }
+            );
+        }
+
+        res.status(200).json({
+            accepted: summary.status === 'accepted',
+            totalTestCases: hidden.length,
+            passedTestCases: summary.testCasesPassed,
+            runtime: summary.runtime,
+            memory: summary.memory,
+            error: summary.status === 'accepted' ? null : (summary.errorMessage || 'Wrong answer'),
+        });
+    } catch (err) {
+        return next(err);
     }
+};
 
-   
-  
-   res.status(201).json({
-    success:status,
-    testCases: testResult,
-    runtime,
-    memory
-   });
-      
-   }
-   catch(err){
-     return next(err);
-   }
-}
+const runCode = async (req, res, next) => {
+    try {
+        const loaded = await loadRunnableProblem(req, res);
+        if (!loaded) return;
 
+        const { problem, code, language } = loaded;
+        const visible = problem.visibleTestCases || [];
+        if (visible.length === 0) {
+            return res.status(400).json({ message: 'This problem has no visible test cases' });
+        }
 
-module.exports = {submitCode,runCode};
+        const languageId = getLanguageById(language);
+        const results = await executeTests(visible.map((testcase) => ({
+            source_code: code,
+            language_id: languageId,
+            stdin: testcase.input,
+            expected_output: testcase.output,
+        })));
 
+        const summary = summarizeJudgeResults(results);
+        res.status(200).json({
+            success: summary.success,
+            testCases: results.map(publicRunCase),
+            runtime: summary.runtime,
+            memory: summary.memory,
+            error: summary.success ? null : summary.errorMessage,
+        });
+    } catch (err) {
+        return next(err);
+    }
+};
 
-
-//     language_id: 54,
-//     stdin: '2 3',
-//     expected_output: '5',
-//     stdout: '5',
-//     status_id: 3,
-//     created_at: '2025-05-12T16:47:37.239Z',
-//     finished_at: '2025-05-12T16:47:37.695Z',
-//     time: '0.002',
-//     memory: 904,
-//     stderr: null,
-//     token: '611405fa-4f31-44a6-99c8-6f407bc14e73',
-
-
-// User.findByIdUpdate({
-// })
-
-//const user =  User.findById(id)
-// user.firstName = "Mohit";
-// await user.save();
+module.exports = { submitCode, runCode };

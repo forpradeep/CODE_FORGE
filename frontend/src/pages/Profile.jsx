@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useSelector } from 'react-redux';
 import axiosClient from '../utils/axiosClient';
 import Navbar from '../components/Navbar';
 import {
@@ -43,7 +42,6 @@ const roleBadge = (role) => {
 };
 
 function Profile() {
-  const { user: authUser } = useSelector((state) => state.auth);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);

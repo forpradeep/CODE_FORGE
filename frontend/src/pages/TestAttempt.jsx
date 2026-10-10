@@ -32,18 +32,29 @@ function TestAttempt() {
   };
 
   useEffect(() => {
+    let cancelled = false;
     const init = async () => {
       try {
         setLoading(true);
-        await axiosClient.post(`/test/${testId}/start`);
-        await loadAttempt();
+        try {
+          await axiosClient.post(`/test/${testId}/start`);
+        } catch (err) {
+          const status = err.response?.status;
+          if (status !== 403 && status !== 409) throw err;
+        }
+        const { data } = await axiosClient.get(`/test/${testId}/attempt`);
+        if (!cancelled) {
+          setState(data);
+          setError(null);
+        }
       } catch (err) {
-        setError(err.response?.data?.message || 'Unable to start this test');
+        if (!cancelled) setError(err.response?.data?.message || 'Unable to open this test');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
     init();
+    return () => { cancelled = true; };
   }, [testId]);
 
   useEffect(() => {
@@ -74,7 +85,7 @@ function TestAttempt() {
     try {
       setSubmitting(true);
       await axiosClient.post(`/test/${testId}/submit`);
-      navigate('/tests');
+      navigate(`/tests/${testId}/result`);
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to submit');
     } finally {
@@ -162,9 +173,10 @@ function TestAttempt() {
         </div>
 
         {isOver && (
-          <div className="alert alert-info rounded-2xl">
+          <div className="alert alert-info rounded-2xl flex-wrap">
             <CheckCircle2 className="w-5 h-5" />
             <span>This assessment has been {state.attempt.status}. All problem submissions are locked.</span>
+            <NavLink to={`/tests/${testId}/result`} className="btn btn-xs btn-primary rounded-lg">View result</NavLink>
           </div>
         )}
 

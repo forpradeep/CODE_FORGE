@@ -39,16 +39,24 @@ const userSchema = new Schema({
     problemSolved:{
         type:[{
             type:Schema.Types.ObjectId,
-            ref:'problem',
-            unique:true
+            ref:'problem'
         }],
+        default: []
     },
     password:{
         type:String,
-        required: true
+        required: true,
+        select: false
     }
 },{
     timestamps:true
+});
+
+userSchema.set('toJSON', {
+    transform(_doc, ret) {
+        delete ret.password;
+        return ret;
+    }
 });
 
 userSchema.post('findOneAndDelete', async function (userInfo) {

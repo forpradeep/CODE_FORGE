@@ -3,82 +3,55 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const User = require('../models/user');
 
+const DEMO_PASSWORD = process.env.SEED_PASSWORD || 'Password@123';
+
+const ACCOUNTS = [
+    { firstName: 'Admin', emailId: 'admin@test.com', role: 'admin' },
+    { firstName: 'Professor', emailId: 'faculty@test.com', role: 'faculty' },
+    { firstName: 'Student', emailId: 'student@test.com', role: 'user' },
+];
+
+async function upsertAccount(account, hashedPassword) {
+    const existing = await User.findOne({ emailId: account.emailId });
+    if (!existing) {
+        await User.create({ ...account, password: hashedPassword });
+        console.log(`Created ${account.role} account: ${account.emailId}`);
+        return;
+    }
+
+    existing.role = account.role;
+    existing.password = hashedPassword;
+    await existing.save();
+    console.log(`Updated ${account.role} account: ${account.emailId}`);
+}
+
 async function seed() {
-  try {
-    await mongoose.connect(process.env.DB_CONNECT_STRING);
-    console.log("Connected to DB");
-
-    // Check all users
-    const allUsers = await User.find({}, 'firstName emailId role');
-    console.log("Existing users:", allUsers);
-
-    // Promote all existing users to admin or create seed accounts
-    const hashedPassword = await bcrypt.hash('Password@123', 10);
-
-    // 1. Ensure admin@test.com exists
-    let admin = await User.findOne({ emailId: 'admin@test.com' });
-    if (!admin) {
-      await User.create({
-        firstName: 'Admin',
-        emailId: 'admin@test.com',
-        password: hashedPassword,
-        role: 'admin'
-      });
-      console.log("Created demo admin account: admin@test.com / Password@123");
-    } else {
-      admin.role = 'admin';
-      admin.password = hashedPassword;
-      await admin.save();
-      console.log("Updated admin account: admin@test.com / Password@123");
+    if (process.env.NODE_ENV === 'production' && process.env.ALLOW_SEED !== 'true') {
+        console.error('Refusing to seed while NODE_ENV=production. Set ALLOW_SEED=true to override.');
+        process.exit(1);
     }
 
-    // 2. Ensure faculty@test.com exists
-    let faculty = await User.findOne({ emailId: 'faculty@test.com' });
-    if (!faculty) {
-      await User.create({
-        firstName: 'Professor',
-        emailId: 'faculty@test.com',
-        password: hashedPassword,
-        role: 'faculty'
-      });
-      console.log("Created demo faculty account: faculty@test.com / Password@123");
-    } else {
-      faculty.role = 'faculty';
-      faculty.password = hashedPassword;
-      await faculty.save();
-      console.log("Updated faculty account: faculty@test.com / Password@123");
+    if (!process.env.DB_CONNECT_STRING) {
+        console.error('DB_CONNECT_STRING is not set');
+        process.exit(1);
     }
 
-    // 3. Ensure student@test.com exists
-    let student = await User.findOne({ emailId: 'student@test.com' });
-    if (!student) {
-      await User.create({
-        firstName: 'Student',
-        emailId: 'student@test.com',
-        password: hashedPassword,
-        role: 'user'
-      });
-      console.log("Created demo student account: student@test.com / Password@123");
-    } else {
-      student.password = hashedPassword;
-      await student.save();
-      console.log("Updated student account: student@test.com / Password@123");
-    }
+    try {
+        await mongoose.connect(process.env.DB_CONNECT_STRING);
+        console.log('Connected to DB');
 
-    // Also promote your current pradeep user if present
-    const pradeepUser = await User.findOne({ firstName: { $regex: /pradeep/i } });
-    if (pradeepUser) {
-      pradeepUser.role = 'admin';
-      await pradeepUser.save();
-      console.log(`Promoted user '${pradeepUser.emailId}' (${pradeepUser.firstName}) to admin!`);
-    }
+        const hashedPassword = await bcrypt.hash(DEMO_PASSWORD, 10);
+        for (const account of ACCOUNTS) {
+            await upsertAccount(account, hashedPassword);
+        }
 
-    console.log("Seeding complete!");
-    process.exit(0);
-  } catch (err) {
-    console.error("Error:", err);
-    process.exit(1);
-  }
+        console.log('Seeding complete. Demo password is the SEED_PASSWORD value, or Password@123 by default.');
+        await mongoose.disconnect();
+        process.exit(0);
+    } catch (err) {
+        console.error('Seed failed:', err.message);
+        process.exit(1);
+    }
 }
 
 seed();

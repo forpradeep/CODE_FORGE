@@ -1,284 +1,234 @@
-const {getLanguageById,submitBatch,submitToken} = require("../utils/problemUtility");
-const Problem = require("../models/problem");
-const User = require("../models/user");
-const Submission = require("../models/submission");
-const SolutionVideo = require("../models/solutionVideo")
+const mongoose = require('mongoose');
+const cloudinary = require('cloudinary').v2;
+const { getLanguageById, executeTests, summarizeJudgeResults } = require('../utils/problemUtility');
+const { publicError } = require('../utils/errors');
+const Problem = require('../models/problem');
+const User = require('../models/user');
+const Submission = require('../models/submission');
+const SolutionVideo = require('../models/solutionVideo');
 
-const createProblem = async (req,res)=>{
-   
-  // API request to authenticate user:
-    const {title,description,difficulty,tags,
-        visibleTestCases,hiddenTestCases,startCode,
-        referenceSolution, problemCreator
-    } = req.body;
+const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
+const problemFields = (body) => ({
+    title: body.title,
+    description: body.description,
+    difficulty: body.difficulty,
+    tags: body.tags,
+    visibleTestCases: body.visibleTestCases,
+    hiddenTestCases: body.hiddenTestCases,
+    startCode: body.startCode,
+    referenceSolution: body.referenceSolution,
+});
 
-    try{
-       
-      for(const {language,completeCode} of referenceSolution){
-         
-
-        // source_code:
-        // language_id:
-        // stdin: 
-        // expectedOutput:
-
+const assertReferenceSolutions = async (referenceSolution, visibleTestCases, hiddenTestCases) => {
+    const cases = [...visibleTestCases, ...hiddenTestCases];
+    for (const { language, completeCode } of referenceSolution) {
         const languageId = getLanguageById(language);
-          
-        // I am creating Batch submission
-        const submissions = visibleTestCases.map((testcase)=>({
-            source_code:completeCode,
+        const results = await executeTests(cases.map((testcase) => ({
+            source_code: completeCode,
             language_id: languageId,
             stdin: testcase.input,
-            expected_output: testcase.output
-        }));
-
-
-        const submitResult = await submitBatch(submissions);
-        // console.log(submitResult);
-
-        const resultToken = submitResult.map((value)=> value.token);
-
-        // ["db54881d-bcf5-4c7b-a2e3-d33fe7e25de7","ecc52a9b-ea80-4a00-ad50-4ab6cc3bb2a1","1b35ec3b-5776-48ef-b646-d5522bdeb2cc"]
-        
-       const testResult = await submitToken(resultToken);
-
-
-       console.log(testResult);
-
-       for(const test of testResult){
-        if(test.status_id!=3){
-         return res.status(400).send("Error Occured");
+            expected_output: testcase.output,
+        })));
+        const summary = summarizeJudgeResults(results);
+        if (summary.status !== 'accepted') {
+            const err = new Error(`Reference solution for ${language} failed (${summary.status})`);
+            err.status = 400;
+            throw err;
         }
-       }
-
-      }
-
-
-      // We can store it in our DB
-
-    const userProblem =  await Problem.create({
-        ...req.body,
-        problemCreator: req.result._id
-      });
-
-      res.status(201).send("Problem Saved Successfully");
     }
-    catch(err){
-        res.status(400).json({message: err.message || String(err)});
+};
+
+const createProblem = async (req, res) => {
+    try {
+        await assertReferenceSolutions(
+            req.body.referenceSolution,
+            req.body.visibleTestCases,
+            req.body.hiddenTestCases
+        );
+
+        await Problem.create({
+            ...problemFields(req.body),
+            problemCreator: req.result._id,
+        });
+
+        res.status(201).json({ message: 'Problem saved successfully' });
+    } catch (err) {
+        const parsed = publicError(err, 400);
+        res.status(parsed.status).json({ message: parsed.message });
     }
-}
+};
 
-const updateProblem = async (req,res)=>{
-    
-  const {id} = req.params;
-  const {title,description,difficulty,tags,
-    visibleTestCases,hiddenTestCases,startCode,
-    referenceSolution, problemCreator
-   } = req.body;
+const updateProblem = async (req, res) => {
+    const { id } = req.params;
+    try {
+        if (!isValidId(id)) {
+            return res.status(400).json({ message: 'Invalid problem id' });
+        }
 
-  try{
+        const existing = await Problem.findById(id);
+        if (!existing) {
+            return res.status(404).json({ message: 'Problem not found' });
+        }
 
-     if(!id){
-      return res.status(400).json({message: "Missing ID Field"});
-     }
+        await assertReferenceSolutions(
+            req.body.referenceSolution,
+            req.body.visibleTestCases,
+            req.body.hiddenTestCases
+        );
 
-    const DsaProblem =  await Problem.findById(id);
-    if(!DsaProblem)
-    {
-      return res.status(404).json({message: "ID is not present in server"});
+        const updated = await Problem.findByIdAndUpdate(
+            id,
+            { $set: problemFields(req.body) },
+            { runValidators: true, new: true }
+        );
+
+        res.status(200).json(updated);
+    } catch (err) {
+        const parsed = publicError(err, 400);
+        res.status(parsed.status).json({ message: parsed.message });
     }
-      
-    for(const {language,completeCode} of referenceSolution){
-         
+};
 
-      // source_code:
-      // language_id:
-      // stdin: 
-      // expectedOutput:
+const deleteProblem = async (req, res) => {
+    const { id } = req.params;
+    try {
+        if (!isValidId(id)) {
+            return res.status(400).json({ message: 'Invalid problem id' });
+        }
 
-      const languageId = getLanguageById(language);
-        
-      // I am creating Batch submission
-      const submissions = visibleTestCases.map((testcase)=>({
-          source_code:completeCode,
-          language_id: languageId,
-          stdin: testcase.input,
-          expected_output: testcase.output
-      }));
+        const deletedProblem = await Problem.findByIdAndDelete(id);
+        if (!deletedProblem) {
+            return res.status(404).json({ message: 'Problem not found' });
+        }
 
+        await Submission.deleteMany({ problemId: id });
+        await User.updateMany({ problemSolved: id }, { $pull: { problemSolved: id } });
 
-      const submitResult = await submitBatch(submissions);
-      // console.log(submitResult);
+        const videos = await SolutionVideo.find({ problemId: id });
+        for (const video of videos) {
+            try {
+                await cloudinary.uploader.destroy(video.cloudinaryPublicId, {
+                    resource_type: 'video',
+                    invalidate: true,
+                });
+            } catch (err) {
+                console.error('Cloudinary delete failed:', err.message);
+            }
+        }
+        await SolutionVideo.deleteMany({ problemId: id });
 
-      const resultToken = submitResult.map((value)=> value.token);
-
-      // ["db54881d-bcf5-4c7b-a2e3-d33fe7e25de7","ecc52a9b-ea80-4a00-ad50-4ab6cc3bb2a1","1b35ec3b-5776-48ef-b646-d5522bdeb2cc"]
-      
-     const testResult = await submitToken(resultToken);
-
-    //  console.log(testResult);
-
-     for(const test of testResult){
-      if(test.status_id!=3){
-       return res.status(400).json({message: "Reference solution failed on visible test cases"});
-      }
-     }
-
+        res.status(200).json({ message: 'Successfully deleted' });
+    } catch (err) {
+        const parsed = publicError(err, 500);
+        res.status(parsed.status).json({ message: parsed.message });
     }
+};
 
+const getProblemById = async (req, res) => {
+    const { id } = req.params;
+    try {
+        if (!isValidId(id)) {
+            return res.status(400).json({ message: 'Invalid problem id' });
+        }
 
-  const newProblem = await Problem.findByIdAndUpdate(id , {...req.body}, {runValidators:true, new:true});
-   
-  res.status(200).send(newProblem);
-  }
-  catch(err){
-      res.status(500).json({message: err.message || String(err)});
-  }
-}
+        const problem = await Problem.findById(id).select(
+            '_id title description difficulty tags visibleTestCases startCode referenceSolution'
+        );
+        if (!problem) {
+            return res.status(404).json({ message: 'Problem not found' });
+        }
 
-const deleteProblem = async(req,res)=>{
+        const solved = (req.result.problemSolved || []).some(
+            (solvedId) => String(solvedId) === String(problem._id)
+        );
 
-  const {id} = req.params;
-  try{
-     
-    if(!id)
-      return res.status(400).send("ID is Missing");
+        const responseData = problem.toObject();
+        if (!solved) {
+            delete responseData.referenceSolution;
+        }
 
-   const deletedProblem = await Problem.findByIdAndDelete(id);
+        const videos = await SolutionVideo.findOne({ problemId: id });
+        if (videos) {
+            responseData.secureUrl = videos.secureUrl;
+            responseData.thumbnailUrl = videos.thumbnailUrl;
+            responseData.duration = videos.duration;
+        }
 
-   if(!deletedProblem)
-    return res.status(404).send("Problem is Missing");
-
-
-   res.status(200).send("Successfully Deleted");
-  }
-  catch(err){
-     
-    res.status(500).json({message: err.message || String(err)});
-  }
-}
-
-
-const getProblemById = async(req,res)=>{
-
-  const {id} = req.params;
-  try{
-     
-    if(!id)
-      return res.status(400).send("ID is Missing");
-
-    const getProblem = await Problem.findById(id).select('_id title description difficulty tags visibleTestCases startCode referenceSolution ');
-   
-    // video ka jo bhi url wagera le aao
-
-   if(!getProblem)
-    return res.status(404).send("Problem is Missing");
-
-   const videos = await SolutionVideo.findOne({problemId:id});
-
-   if(videos){   
-    
-   const responseData = {
-    ...getProblem.toObject(),
-    secureUrl:videos.secureUrl,
-    thumbnailUrl : videos.thumbnailUrl,
-    duration : videos.duration,
-   } 
-  
-   return res.status(200).send(responseData);
-   }
-    
-   res.status(200).send(getProblem);
-
-  }
-  catch(err){
-    res.status(500).json({message: err.message || String(err)});
-  }
-}
-
-const getProblemByIdAdmin = async(req,res)=>{
-
-  const {id} = req.params;
-  try{
-
-    if(!id)
-      return res.status(400).json({message: "ID is Missing"});
-
-    // Full document (including hiddenTestCases + referenceSolution) for the admin edit form.
-    // Never expose this projection through a user-facing route.
-    const getProblem = await Problem.findById(id);
-
-    if(!getProblem)
-      return res.status(404).json({message: "Problem is Missing"});
-
-    res.status(200).send(getProblem);
-
-  }
-  catch(err){
-    res.status(500).json({message: err.message || String(err)});
-  }
-}
-
-const getAllProblem = async(req,res)=>{
-
-  try{
-     
-    const getProblem = await Problem.find({}).select('_id title difficulty tags');
-
-   if(getProblem.length==0)
-    return res.status(404).send("Problem is Missing");
-
-
-   res.status(200).send(getProblem);
-  }
-  catch(err){
-    res.status(500).json({message: err.message || String(err)});
-  }
-}
-
-
-const solvedAllProblembyUser =  async(req,res)=>{
-   
-    try{
-       
-      const userId = req.result._id;
-
-      const user =  await User.findById(userId).populate({
-        path:"problemSolved",
-        select:"_id title difficulty tags"
-      });
-      
-      res.status(200).send(user.problemSolved);
-
+        res.status(200).json(responseData);
+    } catch (err) {
+        const parsed = publicError(err, 500);
+        res.status(parsed.status).json({ message: parsed.message });
     }
-    catch(err){
-      res.status(500).send("Server Error");
+};
+
+const getProblemByIdAdmin = async (req, res) => {
+    const { id } = req.params;
+    try {
+        if (!isValidId(id)) {
+            return res.status(400).json({ message: 'Invalid problem id' });
+        }
+
+        const problem = await Problem.findById(id);
+        if (!problem) {
+            return res.status(404).json({ message: 'Problem not found' });
+        }
+
+        res.status(200).json(problem);
+    } catch (err) {
+        const parsed = publicError(err, 500);
+        res.status(parsed.status).json({ message: parsed.message });
     }
-}
+};
 
-const submittedProblem = async(req,res)=>{
+const getAllProblem = async (req, res) => {
+    try {
+        const problems = await Problem.find({}).select('_id title difficulty tags');
+        res.status(200).json(problems);
+    } catch (err) {
+        const parsed = publicError(err, 500);
+        res.status(parsed.status).json({ message: parsed.message });
+    }
+};
 
-  try{
-     
-    const userId = req.result._id;
-    const problemId = req.params.pid;
+const solvedAllProblembyUser = async (req, res) => {
+    try {
+        const user = await User.findById(req.result._id).populate({
+            path: 'problemSolved',
+            select: '_id title difficulty tags',
+        });
+        res.status(200).json(user?.problemSolved || []);
+    } catch (err) {
+        const parsed = publicError(err, 500);
+        res.status(parsed.status).json({ message: parsed.message });
+    }
+};
 
-   const ans = await Submission.find({userId,problemId});
-  
-  if(ans.length==0)
-    return res.status(200).send([]);
+const submittedProblem = async (req, res) => {
+    try {
+        const problemId = req.params.pid;
+        if (!isValidId(problemId)) {
+            return res.status(400).json({ message: 'Invalid problem id' });
+        }
 
-  res.status(200).send(ans);
+        const submissions = await Submission.find({ userId: req.result._id, problemId })
+            .sort({ createdAt: -1 })
+            .limit(50);
 
-  }
-  catch(err){
-     res.status(500).send("Internal Server Error");
-  }
-}
+        res.status(200).json(submissions);
+    } catch (err) {
+        const parsed = publicError(err, 500);
+        res.status(parsed.status).json({ message: parsed.message });
+    }
+};
 
-
-
-module.exports = {createProblem,updateProblem,deleteProblem,getProblemById,getProblemByIdAdmin,getAllProblem,solvedAllProblembyUser,submittedProblem};
-
-
+module.exports = {
+    createProblem,
+    updateProblem,
+    deleteProblem,
+    getProblemById,
+    getProblemByIdAdmin,
+    getAllProblem,
+    solvedAllProblembyUser,
+    submittedProblem,
+};

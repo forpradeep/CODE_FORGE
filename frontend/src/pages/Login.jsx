@@ -211,7 +211,7 @@ function Login() {
             </button>
           </form>
 
-          {/* Quick Demo Credentials for Fast Testing */}
+          {import.meta.env.DEV && (
           <div className="pt-2 border-t border-base-content/10">
             <span className="text-[11px] uppercase tracking-wider font-bold text-base-content/40 block mb-2 text-center">
               Quick Autofill Demo Accounts
@@ -240,6 +240,7 @@ function Login() {
               </button>
             </div>
           </div>
+          )}
 
           {/* Sign Up Footer */}
           <div className="text-center pt-2">

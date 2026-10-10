@@ -4,10 +4,11 @@ const authRouter =  express.Router();
 const {register, login,logout, adminRegister,facultyRegister,deleteProfile,getProfile} = require('../controllers/userAuthent')
 const userMiddleware = require("../middleware/userMiddleware");
 const adminMiddleware = require('../middleware/adminMiddleware');
+const { authLimiter } = require('../middleware/rateLimiter');
 
 // Register
-authRouter.post('/register', register);
-authRouter.post('/login', login);
+authRouter.post('/register', authLimiter, register);
+authRouter.post('/login', authLimiter, login);
 authRouter.post('/logout', userMiddleware, logout);
 authRouter.post('/admin/register', adminMiddleware ,adminRegister);
 authRouter.post('/faculty/register', adminMiddleware ,facultyRegister);

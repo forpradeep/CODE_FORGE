@@ -1,16 +1,31 @@
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 
-// Run/Submit hit Judge0 (an external, quota-limited API), so these are capped
-// per-user rather than relying on Express's default per-IP behavior alone.
-// userMiddleware runs first on these routes, so req.result is already populated;
-// the ipKeyGenerator fallback only matters if that ever changes.
+const userOrIp = (req) => (req.result ? req.result._id.toString() : ipKeyGenerator(req.ip));
+
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: 'Too many attempts. Please try again in a few minutes.' },
+});
+
 const codeExecutionLimiter = rateLimit({
-    windowMs: 60 * 1000, // 1 minute
+    windowMs: 60 * 1000,
     max: 15,
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: (req) => (req.result ? req.result._id.toString() : ipKeyGenerator(req.ip)),
-    message: { message: "Too many run/submit requests. Please slow down and try again in a minute." }
+    keyGenerator: userOrIp,
+    message: { message: 'Too many run/submit requests. Please slow down and try again in a minute.' },
 });
 
-module.exports = { codeExecutionLimiter };
+const aiLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 8,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: userOrIp,
+    message: { message: 'Too many AI requests. Please wait a minute and try again.' },
+});
+
+module.exports = { authLimiter, codeExecutionLimiter, aiLimiter };
